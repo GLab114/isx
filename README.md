@@ -3,7 +3,6 @@ www.github.com/GLab114/isx
 This repository depends upon the following resources to work properly:
 - Inscopix IDPS API (https://support.inscopix.com/support/products/data-processing-software/inscopix-data-processing-v131)
 - GLab114/lib (www.github.com/GLab114/lib)
-- GLab114/ppln (www.github.com/GLab114/ppln)
 
 In order to use any of the following features, the above resoures must be properly available, and the two folders in the base of the repo, lib and ppln, must be added to the MATLAB path.
 
