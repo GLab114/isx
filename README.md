@@ -761,6 +761,11 @@ Several utility functions for working with Inscopix data files and folders conta
 This namespace contains two pre-made pipelines which process calcium imaging data produced by Inscopix using building blocks in *glab.isx*, i.e. using function provided by the Inscopix Data Processing API.
 
 These two pipelines can actually be chained together; the output of *glab.ppln.isx.dff* can be used as the first input argument to *glab.ppln.isx.pcaica*.
+An example sequence of operations would be:
+- Add GLab114/isx, GLab114/lib, and the Inscopix Data Processing API to the path.
+- Spin up a parallel processing environment with *glab.parenv.start*.
+- Feed the output of *glab.ppln.isx.dff* into *glab.ppln.isx.pcaica*.
+
 
 ### Function: glab.ppln.isx.dff
 
