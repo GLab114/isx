@@ -1,0 +1,357 @@
+function [outPath, itmdPath] = pcaica(dffOutPath, varargin)
+%PCAIC A pre-made PCA/ICA pipeline wrapping the Inscopix Data Processing Software.
+% v0.5.0 | N Gelwan | 2020-05
+%
+%   Usage:
+%   [outPath::string, itmdPath::string] = ...
+%       glab.ppln.isx.pcaica(dffOutPath::string)
+%   Run a pre-made pipeline which processes a DF/F time-seties found in
+%   in `dffOutPath` into an array-formatted collection of sources.
+%
+%   _ = glab.ppln.isx.pcaica(_, 'nICs', x::int)
+%   Specify the number of independent components to expect from the movie
+%   manually. Otherwise, an automatic estimation scheme is used.
+%
+%   _ = glab.ppln.isx.pcaica(_, 'outPath', x::string)
+%   Specify the directory containing output sources.
+%   Defaults to `fullfile(dffOutPath, '../../pcaica/out')`.
+%
+%   _ = glab.ppln.isx.dff(_, 'itmdPath', x::string)
+%   Specify the directory where intermediate products of the pipeline will
+%   be stored. Defaults to `fullfile(dffOutPath, '../dff/itmd');.
+%
+%   _ = glab.ppln.isx.dff(_, 'isxVer', x::string)
+%   Specify the hardware version of the nVista system used to produce the
+%   input movies. This is associated with the file-format of the movie. If
+%   `'nVista2'` is specified, the input movies are expected to be .hdf5
+%   files and their associated .xml header files. Note that without the
+%   associated header files THIS WILL NOT WORK. Additionally, it is
+%   expected that spatial downsampling by a factor of 2 WILL ALREADY HAVE 
+%   BEEN PERFORMED DURING THE DECOMPRESSEION STEP. If `'nVista3'` is
+%   specified, the input movies are expected to be .isxd files, and are
+%   expected to have not bee downsampled or compressed.
+%
+%   _ = glab.ppln.isx.dff(_, 'useCached', x::bool)
+%   Whether or not to use the results of intermediate files from a previous
+%   computation where possible. Note that `itmdPath' must be consistent
+%   between attempts in order for this to work. Also note that this system
+%   is not atomic; if outputs have been produced but are incomplete, and
+%   this is set to true, the system will attempt to use those incomplete
+%   files. You must delete these bad actors manually, or turn this off.
+%   Defaults to `true`.
+%
+%   _ = glab.ppln.isx.dff(_, 'useParallel', x::bool)
+%   Use naive parallelization where possible. This may require a parallel
+%   computing environment to have been started. See glab.parenv for
+%   options. Defaults to `true`.
+%
+%   Examples:
+%   >> isxPath = '~/data/dcmp';
+%   >> glab.util.regex.dir(isxPath, 'isxd$')
+%
+%   ans =
+%
+%     2x1 cell array
+%
+%       {'~/data/dcmp/rec1.isxd'}
+%       {'~/data/dcmp/rec2.isxd'}
+%
+%   >> isxVer = 'nVista3';
+%   >> [outPath, itmdPath] = glab.ppln.isx.dff(isxPath, 'isxVer', isxVer);
+%   >> outPath
+%
+%   ans =
+%
+%       '~/data/dff/out'
+%
+%   >> glab.util.regex.dir(outPath, 'isxd$')
+%
+%   ans =
+%
+%     2x1 cell array
+%
+%       {'~/data/dcmp/rec1-SDS-CROP-BP-MC-DFF.isxd'}
+%       {'~/data/dcmp/rec1-SDS-CROP-BP-MC-DFF.isxd'}
+%
+%   >> itmdPath
+%
+%   ans =
+%
+%       '~/data/dff/itmd'
+%
+%   >> glab.util.regex.dir(itmdPath, 'isxd$')
+%
+%   ans =
+%
+%     8x1 cell array
+%
+%       {'~/data/dcmp/rec1-SDS.isxd'               }
+%       {'~/data/dcmp/rec1-SDS.isxd'               }
+%       {'~/data/dcmp/rec1-SDS-CROP.isxd'          }
+%       {'~/data/dcmp/rec1-SDS-CROP.isxd'          }
+%       {'~/data/dcmp/rec1-SDS-CROP-BP.isxd'       }
+%       {'~/data/dcmp/rec1-SDS-CROP-BP.isxd'       }
+%       {'~/data/dcmp/rec1-SDS-CROP-BP-MC.isxd'    }
+%       {'~/data/dcmp/rec1-SDS-CROP-BP-MC.isxd'    }
+
+%% Input parsing
+defaultNICs = [];
+defaultOutPath = [];
+defaultItmdPath = [];
+defaultUseCached = true;
+defaultUseParallel = true;
+defaultLogger = glab.util.defaultLogger();
+
+p = inputParser();
+addParameter(p, 'nICs', defaultNICs ...
+    );
+addParameter(p, 'outPath', defaultOutPath ...
+    );
+addParameter(p, 'itmdPath', defaultItmdPath ...
+    );
+addParameter(p, 'useCached', defaultUseCached, ...
+    @(x)isscalar(x) && islogical(x));
+addParameter(p, 'useParallel', defaultUseParallel, ...
+    @(x)isscalar(x) && islogical(x));
+addParameter(p, 'logger', defaultLogger ...
+    );
+parse(p, varargin{:});
+
+nICs = p.Results.nICs;
+outPath = p.Results.outPath;
+itmdPath = p.Results.itmdPath;
+useCached = p.Results.useCached;
+useParallel = p.Results.useParallel;
+l = p.Results.logger;
+
+%%
+% Set up the ouput paths
+if isempty(outPath)
+    upDir = fileparts(fileparts(dffOutPath));
+    pcaicaPath = fullfile(upDir, 'pcaica');
+
+    warning('off', 'MATLAB:MKDIR:DirectoryExists');
+    mkdir(pcaicaPath);
+    warning('on', 'MATLAB:MKDIR:DirectoryExists');
+
+    outPath = fullfile(pcaicaPath, 'out');
+end
+warning('off', 'MATLAB:MKDIR:DirectoryExists');
+mkdir(outPath);
+warning('on', 'MATLAB:MKDIR:DirectoryExists');
+
+if isempty(itmdPath)
+    upDir = fileparts(fileparts(dffOutPath));
+    pcaicaPath = fullfile(upDir, 'pcaica');
+
+    warning('off', 'MATLAB:MKDIR:DirectoryExists');
+    mkdir(pcaicaPath);
+    warning('on', 'MATLAB:MKDIR:DirectoryExists');
+
+    itmdPath = fullfile(pcaicaPath, 'itmd');
+end
+warning('off', 'MATLAB:MKDIR:DirectoryExists');
+mkdir(itmdPath);
+warning('on', 'MATLAB:MKDIR:DirectoryExists');
+
+% Turn on/off cache validation 
+if useCached
+    chkCached = @(x)glab.util.filePathsPresent(x);
+else
+    chkCached = @(x)false;
+end
+
+%%
+dffFilePaths = glab.util.regex.dir(dffOutPath, 'DFF.isxd$');
+
+% tds
+tdsFilePaths = glab.util.txFilePaths( ...
+    dffFilePaths, ...
+    'pathTx', @(path)itmdPath, ...
+    'nameTx', @(name)[name '-TDS'] ...
+);
+
+tdsComp = glab.proc.CachedComp( ...
+    @glab.isx.temporalDownsample, 0, ...
+    @()chkCached(tdsFilePaths), ...
+    @()[], ...
+    @(x)[], ...
+    'logger', l ...
+);
+
+% maxProj
+maxProjFilePath = fullfile(itmdPath, 'maxProj.isxd');
+
+maxProjComp = glab.proc.CachedComp( ...
+    @glab.isx.projectMax, 0, ...
+    @()chkCached({maxProjFilePath}), ...
+    @()[], ...
+    @(x)[], ...
+    'logger', l ...
+);
+
+% minProj
+minProjFilePath = fullfile(itmdPath, 'minProj.isxd');
+
+minProjComp = glab.proc.CachedComp( ...
+    @glab.isx.projectMin, 0, ...
+    @()chkCached({minProjFilePath}), ...
+    @()[], ...
+    @(x)[], ...
+    'logger', l ...
+);
+
+% pcaica
+pcaicaFilePaths = glab.util.txFilePaths( ...
+    tdsFilePaths, ...
+    'nameTx', @(name)[name '-PCAICA'] ...
+);
+
+pcaicaComp = glab.proc.CachedComp( ...
+    @glab.isx.pcaica, 0, ...
+    @()chkCached(pcaicaFilePaths), ...
+    @()[], ...
+    @(x)[], ...
+    'logger', l ...
+);
+
+% sort
+asvFilePath = fullfile(itmdPath, 'sortAsv.mat');
+srcLocsFilePath = fullfile(itmdPath, 'srcLocs.isxd');
+nplLocFilePath = fullfile(itmdPath, 'nplLoc.isxd');
+
+sortComp = glab.proc.CachedComp( ...
+    @glab.ppln.isx.pcaica.sort, 0, ...
+    @()chkCached({srcLocsFilePath, nplLocFilePath}), ...
+    @()[], ...
+    @(x)[], ...
+    'logger', l ...
+);
+
+% xrctSrcs
+srcTracesFilePaths = glab.util.txFilePaths( ...
+    dffFilePaths, ...
+    'pathTx', @(path)itmdPath, ...
+    'nameTx', @(name)[name '-SRCS'] ...
+);
+
+xrctSrcTracesComp = glab.proc.CachedComp( ...
+    @glab.isx.applyCellSetLocs, 0, ...
+    @()chkCached(srcTracesFilePaths), ...
+    @()[], ...
+    @(x)[], ...
+    'logger', l ...
+);
+
+% xrctNplTrace
+nplTraceFilePaths = glab.util.txFilePaths( ...
+    dffFilePaths, ...
+    'pathTx', @(path)itmdPath, ...
+    'nameTx', @(name)[name '-NPL'] ...
+);
+
+xrctNplTraceComp = glab.proc.CachedComp( ...
+    @glab.isx.applyCellSetLocs, 0, ...
+    @()chkCached(nplTraceFilePaths), ...
+    @()[], ...
+    @(x)[], ...
+    'logger', l ...
+);
+
+%%
+l.debug(['useCached = ' num2str(useCached)]);
+l.debug(['dffOutPath = ' dffOutPath]);
+l.debug(['outPath = ' outPath]);
+l.debug(['itmdPath = ' itmdPath]);
+l.debug(['useParallel = ' num2str(useParallel)]);
+
+l.infoSrE('Temporally downsampling');
+glab.proc.runComp( ...
+    tdsComp, 0, ...
+    dffFilePaths, tdsFilePaths, 5, ...
+    'useParallel', useParallel ...
+);
+l.srX();
+
+l.infoSrE('Taking max projection');
+glab.proc.runComp( ...
+    maxProjComp, 0, ...
+    tdsFilePaths, maxProjFilePath ...
+);
+maxProjRef = isx.Image.read(maxProjFilePath);
+maxProj = maxProjRef.get_data();
+l.srX();
+
+l.infoSrE('Taking min projection');
+glab.proc.runComp( ...
+    minProjComp, 0, ...
+    tdsFilePaths, minProjFilePath ...
+);
+minProjRef = isx.Image.read(minProjFilePath);
+minProj = minProjRef.get_data();
+l.srX();
+
+% This is the "range projection"
+ref = maxProj - minProj;
+
+if isempty(nICs)
+    l.infoSrE('Estimating number of ICs');
+    nICs = glab.ca.estimateNICs(ref);
+    l.debug(['Estimated ' num2str(nICs) ' ICs']);
+    l.srX();
+end
+
+l.infoSrE('Using PCA/ICA to produce source localizations');
+glab.proc.runComp( ...
+    pcaicaComp, 0, ...
+    tdsFilePaths, pcaicaFilePaths, nICs ...
+);
+l.srX();
+
+l.infoSrE('Sorting');
+glab.proc.runComp( ...
+    sortComp, 0, ...
+    pcaicaFilePaths, srcLocsFilePath, nplLocFilePath, ref, ...
+    'asvFilePath', asvFilePath, ...
+    'logger', l ...
+);
+l.srX();
+
+l.infoSrE('Extracting source traces from DF/F');
+glab.proc.runComp( ...
+    xrctSrcTracesComp, 0, ...
+    dffFilePaths, srcLocsFilePath, srcTracesFilePaths, 0 ...
+);
+l.srX();
+
+%%
+l.infoSrE('Extracting neuropil trace');
+glab.proc.runComp( ...
+    xrctNplTraceComp, 0, ...
+    dffFilePaths, nplLocFilePath, nplTraceFilePaths, 0 ...
+);
+l.srX();
+
+%%
+l.infoSrE('Loading extracted sources into memory');
+[srcLocs, srcTrcs] = glab.isx.importSources(srcTracesFilePaths);
+l.srX();
+
+%%
+l.infoSrE('Loading extracted neuropil into memory');
+[nplLoc, nplTrc] = glab.isx.importSources(nplTraceFilePaths);
+l.srX();
+
+%%
+l.infoSrE('Saving sources');
+sourcesFilePath = fullfile(outPath, 'sources.mat');
+save( ...
+    sourcesFilePath, ...
+    'srcLocs', ...
+    'srcTrcs', ...
+    'nplLoc', ...
+    'nplTrc' ...
+);
+l.srX();
+
+end
