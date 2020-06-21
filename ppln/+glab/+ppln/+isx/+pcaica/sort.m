@@ -5,10 +5,13 @@ function [] = ...
 
 %%
 defaultAsvFilePath = [];
+defaultUseParallel = false;
 defaultLogger = glab.util.defaultLogger();
 
 p = inputParser();
 addParameter(p, 'asvFilePath', defaultAsvFilePath ...
+    );
+addParameter(p, 'useParallel', defaultUseParallel ...
     );
 addParameter(p, 'logger', defaultLogger ...
     );
@@ -19,7 +22,10 @@ l = p.Results.logger;
 
 %%
 l.infoSrE('Loading sources into memory');
-[icLocs, icTraces] = glab.isx.importSources(pcaicaFilePaths);
+[icLocs, icTraces] = glab.isx.importSources( ...
+    pcaicaFilePaths, ...
+    'useParallel', false ...
+);
 l.srX();
 
 l.infoSrE('Thresholding source localizations');
